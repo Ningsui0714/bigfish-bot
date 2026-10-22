@@ -1,0 +1,87 @@
+{
+  "name": "dsh-qq-free-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "把 QQ 机器人接入 DeepSeek Harness，并只提供免充值的 DeepSeek 模型（账号渠道官方积分 + Kilo 免费池兜底）。Connect a QQ bot to DeepSeek Harness with zero-balance DeepSeek models.",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "node scripts/build-host.mjs && node plugin-src/client/build.mjs",
+    "migrate": "node scripts/migrate.mjs",
+    "check": "npm run build && npm run verify && npm test",
+    "test": "node --test test/*.test.mjs",
+    "verify": "node scripts/verify-imports.mjs && node scripts/verify-client.mjs"
+  },
+  "files": [
+    "lib",
+    "locale/*.json",
+    "plugin-src",
+    "src",
+    "vendor",
+    "LICENSE",
+    "LICENSE.upstream-dsh-im",
+    "LICENSE.upstream-dsh-our-free-model",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md",
+    "cordis.patch.yml"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "qq",
+    "qqbot",
+    "deepseek",
+    "free-model"
+  ],
+  "author": "dsh-qq-free-bot contributors",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "dependencies": {
+    "@tencent-connect/qqbot-connector": "1.2.0",
+    "@tencent-connect/qqbot-nodejs": "1.0.4",
+    "qrcode": "1.5.4",
+    "undici": "7.29.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-commands": "^0.1.7-rc.2 || ^0.2.0-rc.1 || ^0.2.1-rc.2",
+    "@deepseek-ai/dsh-credentials": "^0.1.7-rc.2 || ^0.2.0-rc.1 || ^0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.1.7-rc.2 || ^0.2.0-rc.1 || ^0.2.1-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "esbuild": "0.25.9",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "semver": "7.8.5"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    },
+    "compatibility": {
+      "dsh": "0.2.1-rc.2",
+      "profiles": [
+        "web"
+      ]
+    }
+  }
+}
