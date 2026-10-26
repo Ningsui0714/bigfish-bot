@@ -1,6 +1,6 @@
 # Third-party notices
 
-本产品 `dsh-qq-free-bot` 把两个上游项目的代码内联进来，并保留各自的许可与出处。
+本产品现名 **大肥鱼 BigFish**，仓库与包名为 `bigfish-bot`，前身为 `dsh-qq-free-bot`。仓库保留旧集成及其上游代码、完整许可与出处；当前独立版的来源另列于文末。
 
 ## 内联的上游项目
 
@@ -53,7 +53,7 @@ WhatsApp、Matrix 等渠道的协议适配）见
 | 包 | 版本 | 许可证 |
 | --- | --- | --- |
 | [`@tencent-connect/qqbot-connector`](https://www.npmjs.com/package/@tencent-connect/qqbot-connector) | 1.2.0 | `UNLICENSED`（腾讯官方包） |
-| [`@tencent-connect/qqbot-nodejs`](https://www.npmjs.com/package/@tencent-connect/qqbot) | 1.0.4 | MIT |
+| [`@tencent-connect/qqbot-nodejs`](https://www.npmjs.com/package/@tencent-connect/qqbot-nodejs) | 1.0.4 | MIT |
 | [`qrcode`](https://www.npmjs.com/package/qrcode) | 1.5.4 | MIT |
 | [`undici`](https://www.npmjs.com/package/undici) | 7.29.1 | MIT |
 | [`semver`](https://www.npmjs.com/package/semver) | 7.8.5 | ISC |
@@ -69,4 +69,17 @@ QQ 是腾讯公司及其关联公司的商标。本项目与腾讯、华为云�
 智谱、讯飞、商汤、MiniMax、Google、Moonshot、Kilo AI 等厂商无隶属、认可
 或赞助关系。产品名称与标识归各自所有者所有。
 
-本项目是独立的 DeepSeek Harness 集成，不包含 OpenClaw。
+当前主应用为独立本地 QQ 群聊助手，不依赖 DeepSeek Harness 或 OpenClaw 运行。仓库中的旧 DSH 集成仅为兼容代码。
+
+## 独立版 TRAE 客户端协议适配
+
+`standalone/server/trae.mjs` 中客户端协议字段、模型列表与流格式、账号积分响应解析，参考并改写自上述 MIT `vendor/channel-pack`（Copyright (c) 2026 Jet）。本项目保留原完整许可证 `vendor/channel-pack/LICENSE`。新适配不加载上游 DSH 宿主；没有移植上游的设备轮换或多账号池逻辑。
+
+### Standalone account protocol subset
+
+`standalone/server/vendor/channels.mjs` and `qoder-auth-wasm.wasm` derive from the repository's MIT-licensed `vendor/channel-pack/pack.js` snapshot, Copyright (c) 2026 Jet. The license is copied to `standalone/server/vendor/LICENSE`. The extraction script is `standalone/scripts/build-channels.mjs`; it does not mount the original host plugin, account pool, or gateway. Original bundled dependency notices are retained inline. Local value-type compatibility definitions and account/UI orchestration are independently implemented.
+
+
+### Standalone QQ official transport
+
+The standalone app now directly depends on `@tencent-connect/qqbot-nodejs` 1.0.4 (MIT), installed as an external npm dependency, for QQ Open Platform token exchange, signed Webhook dispatch and text replies. The dependency retains its LICENSE in its installed package. `@tencent-connect/qqbot-connector` 1.2.0 is also an external npm dependency for official QR binding; its metadata declares UNLICENSED. No connector implementation source is copied into the standalone app. `qrcode` 1.5.4 (MIT) generates QR PNGs locally. NapCat is an independently installed external service; no NapCat implementation is copied into this repository.

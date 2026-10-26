@@ -11,6 +11,7 @@ import { createQqBridgeStatus, QqHarnessBridge } from './qq-bridge.mjs';
 import {
   applyQqGroupChatbotTrigger,
   isQqMessageAddressed,
+  isQqPassiveGroupChatbotMessage,
   normalizeQqGroupChatbotConfig,
   normalizeQqMentions,
 } from './qq-mention.mjs';
@@ -224,7 +225,8 @@ export class QqRuntime {
       keepAlive: true,
       predicate: (ctx) => {
         const message = ctx?.message;
-        if (!isQqMessageAddressed(message)) return false;
+        // Passive candidates have not passed the local participation gate yet.
+        if (!isQqMessageAddressed(message) || isQqPassiveGroupChatbotMessage(message)) return false;
         if (!this.#accessPolicy) {
           return message.kind === 'group'
             || this.#config.ownerUserOpenid === '*'

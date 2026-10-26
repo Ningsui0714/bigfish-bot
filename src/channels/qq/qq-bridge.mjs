@@ -1,3 +1,5 @@
+import { QqGroupMind, SILENT_REPLY } from './group-mind.mjs';
+import { contextBlockFor, composeContextPrompt } from '../shared/conversation/context-builder.mjs';
 import { captureGroupHistory } from '../shared/group-history.mjs';
 import { BusyMessageDispatcher, canAutomaticallySteer } from '../shared/busy-message-dispatcher.mjs';
 import { isPermissionCommand, runPermissionCommand } from '../shared/permission-command.mjs';
@@ -80,6 +82,7 @@ import { withSessionBindingLock } from '../shared/session-binding-lock.mjs';
 import { t } from '../shared/i18n.mjs';
 import {
   isQqMessageAddressed,
+  applyQqGroupChatbotTrigger,
   isQqPassiveGroupChatbotMessage,
   normalizeQqGroupChatbotConfig,
   normalizeQqMentions,
@@ -166,6 +169,7 @@ function sourceGuidanceFor(message, snapshot, groupChatbot) {
   const parts = [];
   if (message?.kind === 'group' && groupChatbot.enabled && groupChatbot.guidance) {
     parts.push(groupChatbot.guidance);
+    parts.push(isQqPassiveGroupChatbotMessage(message) ? "本轮是群聊接话候选，可以选择沉默。" : "本轮用户明确 @ 你，请直接回应。", "配置的称呼：" + groupChatbot.nicknames.join("、"));
   }
   const configured = snapshot?.config?.guidance;
   if (typeof configured === 'string' && configured.trim()) parts.push(configured.trim());
@@ -487,6 +491,7 @@ export class QqHarnessBridge {
   #menus = new QqMenuStore();
   #menuTasks = new Map();
   #groupChatbot;
+  #groupMind;
 
   constructor({
     bot,
@@ -529,6 +534,7 @@ export class QqHarnessBridge {
     this.#fetchImpl = fetchImpl;
     this.#fileUploadTimeoutMs = Math.min(fileUploadTimeoutMs, DEFAULT_FILE_UPLOAD_TIMEOUT_MS);
     this.#groupChatbot = normalizeQqGroupChatbotConfig(groupChatbot);
+    this.#groupMind = new QqGroupMind({ config: this.#groupChatbot, memories: state.socialMemory?.() });
     this.#approvals = new HarnessApprovalQueue({ label: 'qq', logger });
     // A queued message lives only in #queues. If the process dies before its
     // turn runs the user has already been told it is queued, so the persisted
@@ -563,6 +569,7 @@ export class QqHarnessBridge {
       || this.#state.hasSeen(messageId)
       || this.#acceptedMessageIds.has(messageId)) return Promise.resolve();
     message = normalizeQqMentions(message, new Set([this.#bot.appId]));
+    applyQqGroupChatbotTrigger(message, this.#groupChatbot);
     const key = conversationKey(message);
     const addressed = isQqMessageAddressed(message);
     const commandText = safeText(message);
@@ -575,7 +582,7 @@ export class QqHarnessBridge {
       && this.#batchInputs.status(key).phase === 'idle';
     const menuInput = numericMenu
       ? `/m pick ${this.#menus.tokenFor(key, sender)} ${commandText}` : commandText;
-    if (addressed) {
+    if (addressed || (message.kind === 'group' && this.#groupChatbot.enabled)) {
       const access = this.#accessPolicy
         ? evaluateInboundAccess(this.#accessPolicy, {
             conversationType: message.kind === 'c2c' ? 'direct' : 'group',
@@ -591,6 +598,23 @@ export class QqHarnessBridge {
       if (!access.allowed) {
         this.#acceptedMessageIds.set(messageId, null);
         return this.#finishAccessDecision(message, messageId, access);
+      }
+    }
+    if (message.kind === 'group' && this.#groupChatbot.enabled && !commandText.startsWith('/')) {
+      const decision = this.#groupMind.consider(message, {
+        addressed: addressed && !isQqPassiveGroupChatbotMessage(message),
+        busy: this.#queues.has(key) || this.#pendingInteractions.has(key) || this.#approvals.hasPending(key),
+      });
+      this.#status.lastParticipation = { reason: decision.reason, speak: decision.speak };
+      if (!decision.speak) {
+        this.#acceptedMessageIds.set(messageId, null);
+        return (async () => {
+          try {
+            if (decision.memoryChanged) await this.#state.setSocialMemory(this.#groupMind.memorySnapshot());
+            await this.#state.markSeen(messageId);
+            if (decision.reply) await this.#bot.sendText(message.replyTarget, decision.reply);
+          } finally { this.#acceptedMessageIds.delete(messageId); }
+        })();
       }
     }
     this.#acceptedMessageIds.set(messageId, captureContextEnhancement(
@@ -925,7 +949,10 @@ export class QqHarnessBridge {
   }
 
   async #deliverDeferredOutcome(entry, outcome) {
-    await sendMarkdownReply(this.#bot, entry.target, deferredOutcomeText(outcome), { logger: this.#logger });
+    const text = deferredOutcomeText(outcome);
+    if (entry.target?.scope === 'group' && (text.trim() === SILENT_REPLY
+      || this.#groupMind.isMuted({ groupOpenid: entry.target.targetId }))) return true;
+    await sendMarkdownReply(this.#bot, entry.target, text, { logger: this.#logger });
     return true;
   }
 
@@ -1286,6 +1313,18 @@ export class QqHarnessBridge {
         }));
         contextEnhanced = content !== originalContent;
       }
+      if (message.kind === 'group' && this.#groupChatbot.enabled) {
+        const block = contextBlockFor({ collector: 'qq-social', roomId: message.groupOpenid,
+          text: this.#groupMind.context(message) });
+        // Keep untrusted conversational data out of sourceGuidance/system policy.
+        if (typeof (content ?? text) === 'string') {
+          content = composeContextPrompt({ block, promptText: content ?? text });
+          contextEnhanced = true;
+        } else if (Array.isArray(content)) {
+          content = [{ type: 'text', text: block }, ...content];
+          contextEnhanced = true;
+        }
+      }
       // QQ stream_messages can acknowledge a final frame without rendering it in
       // some C2C clients. Standard Markdown delivery is the reliable reply path.
       const toolErrors = [];
@@ -1353,6 +1392,10 @@ export class QqHarnessBridge {
       }
       this.#signal?.throwIfAborted();
       const answerText = answerTextForDelivery(answer, artifacts);
+      if (isQqPassiveGroupChatbotMessage(message) && (this.#groupMind.isMuted(message) || (answerText.trim() === SILENT_REPLY && artifacts.length === 0))) {
+        this.#status.lastParticipation = { reason: 'model-silence', speak: false };
+        return;
+      }
       const displayAnswer = toolErrors.length > 0
         ? `${answerText}\n\n---\n\n${toolErrors.join('\n\n')}`
         : answerText;
@@ -1402,6 +1445,9 @@ export class QqHarnessBridge {
       }
       if (textSendError && delivery.artifactSendErrors === 0) {
         setLastMessageFailure(this.#status, textSendError);
+      }
+      if (!textSendError && message.kind === 'group' && this.#groupChatbot.enabled) {
+        this.#groupMind.delivered(message, displayAnswer);
       }
       this.#status.messagesReplied += 1;
       this.#status.lastReplyAt = new Date().toISOString();

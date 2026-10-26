@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <title>大肥鱼 BigFish</title>
+  <rect width="64" height="64" rx="18" fill="#2864E8"/>
+  <path d="M12 35c0-9 8-16 19-16 7 0 13 3 17 8l9-6v25l-10-6c-4 6-10 9-17 9-11 0-18-6-18-14Z" fill="#EDF3FF"/>
+  <path d="m25 20 5-8 7 9M29 47l6 8 4-10" fill="#EDF3FF"/>
+  <circle cx="22.5" cy="31.5" r="2.5" fill="#174BBD"/>
+  <path d="M19 38c2 2 5 2 7 0" stroke="#174BBD" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="45" cy="13" r="3" fill="#9DBBFF"/>
+</svg>

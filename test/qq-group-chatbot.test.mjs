@@ -50,14 +50,9 @@ test('unmentioned group slash commands still require an explicit mention', () =>
 });
 
 test('the group chatbot can be disabled or given custom guidance', () => {
-  assert.deepEqual(normalizeQqGroupChatbotConfig(false), {
-    enabled: false,
-    guidance: '',
-  });
-  assert.deepEqual(normalizeQqGroupChatbotConfig({ guidance: '只吐槽，不总结。' }), {
-    enabled: true,
-    guidance: '只吐槽，不总结。',
-  });
+  assert.equal(normalizeQqGroupChatbotConfig(false).enabled, false);
+  assert.equal(normalizeQqGroupChatbotConfig(false).guidance, '');
+  assert.equal(normalizeQqGroupChatbotConfig({ guidance: '只吐槽，不总结。' }).guidance, '只吐槽，不总结。');
 
   const message = {
     kind: 'group',

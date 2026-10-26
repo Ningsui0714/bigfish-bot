@@ -1,3 +1,4 @@
+import { normalizeSocialMemory } from './group-mind.mjs';
 import { deferredStateAccess, normalizeDeferredState } from '../shared/deferred-state.mjs';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -63,6 +64,7 @@ function normalizeState(value) {
   return {
     version: 1,
     sessions,
+    socialMemory: normalizeSocialMemory(value.socialMemory),
     includeArchivedSessions: value.includeArchivedSessions === true,
     ...(pendingMessages.length ? { pendingMessages } : {}),
     ...(value.deferred ? { deferred: normalizeDeferredState(value.deferred) } : {}),
@@ -204,6 +206,13 @@ export class QqStateStore {
     if (this.#state.seenMessageIds.length > 1_000) {
       this.#state.seenMessageIds.splice(0, this.#state.seenMessageIds.length - 1_000);
     }
+    await this.#persist();
+  }
+
+  socialMemory() { return structuredClone(this.#state.socialMemory ?? []); }
+
+  async setSocialMemory(value) {
+    this.#state.socialMemory = normalizeSocialMemory(value);
     await this.#persist();
   }
 

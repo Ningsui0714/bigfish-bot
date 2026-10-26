@@ -1,9 +1,9 @@
 {
-  "name": "dsh-qq-free-bot",
-  "version": "0.1.0",
+  "name": "bigfish-bot",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "把 QQ 机器人接入 DeepSeek Harness，并只提供免充值的 DeepSeek 模型（账号渠道官方积分 + Kilo 免费池兜底）。Connect a QQ bot to DeepSeek Harness with zero-balance DeepSeek models.",
+  "description": "大肥鱼 BigFish：独立本地 QQ 群聊助手，支持官方机器人扫码、NapCat、自然接话、人格记忆与多厂商统一模型。",
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",
@@ -11,11 +11,17 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "node scripts/build-host.mjs && node plugin-src/client/build.mjs",
+    "build": "npm --prefix standalone run build",
     "migrate": "node scripts/migrate.mjs",
-    "check": "npm run build && npm run verify && npm test",
+    "check": "npm run local:check && npm run legacy:check",
     "test": "node --test test/*.test.mjs",
-    "verify": "node scripts/verify-imports.mjs && node scripts/verify-client.mjs"
+    "verify": "node scripts/verify-imports.mjs && node scripts/verify-client.mjs",
+    "start": "node standalone/server/index.mjs",
+    "local:install": "npm --prefix standalone ci",
+    "local:build": "npm --prefix standalone run build",
+    "local:check": "npm --prefix standalone run check",
+    "legacy:build": "node scripts/build-host.mjs && node plugin-src/client/build.mjs",
+    "legacy:check": "npm run legacy:build && npm run verify && npm test"
   },
   "files": [
     "lib",
@@ -31,15 +37,16 @@
     "cordis.patch.yml"
   ],
   "keywords": [
-    "deepseek-harness",
-    "dsh",
-    "dsh-plugin",
+    "bigfish",
     "qq",
     "qqbot",
-    "deepseek",
-    "free-model"
+    "napcat",
+    "onebot",
+    "chatbot",
+    "agent",
+    "deepseek"
   ],
-  "author": "dsh-qq-free-bot contributors",
+  "author": "BigFish contributors",
   "license": "MIT",
   "engines": {
     "node": ">=22.19"
@@ -83,5 +90,13 @@
         "web"
       ]
     }
+  },
+  "homepage": "https://github.com/Ningsui0714/bigfish-bot#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ningsui0714/bigfish-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Ningsui0714/bigfish-bot/issues"
   }
 }

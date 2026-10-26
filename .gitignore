@@ -6,3 +6,17 @@ coverage/
 .env.*
 !.env.example
 *.log
+
+# Independent local app: never commit user settings or credentials.
+standalone/data/
+standalone/dist/
+standalone/design/qa/
+
+# Local design iterations and account QA are not release assets.
+standalone/design/*.png
+standalone/design/archive/
+standalone/design/*.json
+*.local
+*.key
+*.enc
+*.enc.bak

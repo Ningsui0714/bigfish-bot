@@ -1,0 +1,28 @@
+{
+  "name": "bigfish-bot-local",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "node --test test/*.test.mjs",
+    "check": "npm run build && npm test",
+    "channels:build": "node scripts/build-channels.mjs"
+  },
+  "dependencies": {
+    "@tencent-connect/qqbot-connector": "1.2.0",
+    "@tencent-connect/qqbot-nodejs": "1.0.4",
+    "qrcode": "1.5.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "vite": "^7.1.12"
+  }
+}
