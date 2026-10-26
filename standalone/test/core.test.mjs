@@ -63,7 +63,7 @@ test('agent has standalone local memory, room isolation, actual context and no H
   await agent.receive(message('你记得吗'), { local: true }); assert.equal(calls, 1);
   assert.match(JSON.stringify(prompts[0]), /我喜欢茶/);
   await agent.receive(message('继续聊'), { local: true }); assert.match(JSON.stringify(prompts[1]), /bot:self/);
-  const denied = await agent.receive(message('你好', { addressed: true })); assert.equal(denied.reason, 'access-denied');
+  const denied = await agent.receive(message('你好', { addressed: true })); assert.equal(denied.reason, 'access-denied'); assert.equal(agent.events.at(-1).reason,'access-denied'); assert.equal(agent.events.at(-1).detail,'not-allowlisted');
   const forgot = await agent.receive(message('大肥鱼忘记我'), { local: true }); assert.ok(!forgot.text.includes('DSH')); assert.equal(agent.memories().length, 0);
 }));
 test('OneBot normalizer ignores self and non-array events, detects self mention only', () => {

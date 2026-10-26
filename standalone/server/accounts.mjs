@@ -5,9 +5,9 @@ import * as sdk from './vendor/channels.mjs';
 import { channelOperation, protocolFetch } from './channel-transport.mjs';
 import { ACCOUNT_CHANNELS, accountChannel, normalizeAccounts, publicAccounts } from './channel-state.mjs';
 import { shanghaiDay } from './trae.mjs';
-const products={lobsterai:sdk.LOBSTERAI,qoder:sdk.QODER,qodercn:sdk.QODER_CN,cline:sdk.CLINE,loomy:sdk.LOOMY,raccoon:sdk.RACCOON,zcode:sdk.ZCODE,minimax:sdk.MINIMAX,gemini:sdk.GEMINI};
-const authTypes={codearts:sdk.CodeArtsAuth,lobsterai:sdk.LobsteraiAuth,qoder:sdk.QoderAuth,qodercn:sdk.QoderAuth,cline:sdk.ClineAuth,loomy:sdk.LoomyAuth,raccoon:sdk.RaccoonAuth,minimax:sdk.MinimaxAuth,gemini:sdk.GeminiAuth};
-const adapterTypes={codearts:sdk.CodeArtsAdapter,lobsterai:sdk.LobsteraiAdapter,qoder:sdk.QoderAdapter,qodercn:sdk.QoderAdapter,cline:sdk.ClineAdapter,loomy:sdk.LoomyAdapter,raccoon:sdk.RaccoonAdapter,zcode:sdk.ZcodeAdapter,minimax:sdk.MinimaxAdapter,gemini:sdk.GeminiAdapter};
+const products={qoder:sdk.QODER,qodercn:sdk.QODER_CN,cline:sdk.CLINE,loomy:sdk.LOOMY,raccoon:sdk.RACCOON,zcode:sdk.ZCODE,minimax:sdk.MINIMAX,gemini:sdk.GEMINI};
+const authTypes={codearts:sdk.CodeArtsAuth,qoder:sdk.QoderAuth,qodercn:sdk.QoderAuth,cline:sdk.ClineAuth,loomy:sdk.LoomyAuth,raccoon:sdk.RaccoonAuth,minimax:sdk.MinimaxAuth,gemini:sdk.GeminiAuth};
+const adapterTypes={codearts:sdk.CodeArtsAdapter,qoder:sdk.QoderAdapter,qodercn:sdk.QoderAdapter,cline:sdk.ClineAdapter,loomy:sdk.LoomyAdapter,raccoon:sdk.RaccoonAdapter,zcode:sdk.ZcodeAdapter,minimax:sdk.MinimaxAdapter,gemini:sdk.GeminiAdapter};
 export class AccountError extends Error {constructor(message,code='account-error'){super(message);this.name='AccountError';this.code=code;}}
 export class AccountHub {
   sessions=new Map(); epochs=new Map(); locks=new Map(); adapters=new Map(); stopped=false; ticker=null; stopController=new AbortController();
@@ -55,7 +55,6 @@ export class AccountHub {
   }
   async startFlow(id,signal){const p=products[id],options={product:p,fetcher:protocolFetch,signal};const api=this.protocol;
     if(id==='codearts')return api.startOAuthFlow(options);
-    if(id==='lobsterai')return api.startLobsteraiLoginFlow({...options,clientVersion:await this.service(id).resolveClientVersion()});
     if(id==='qoder'||id==='qodercn')return api.startQoderLoginFlow(options);
     if(id==='cline')return api.startClineLoginFlow(options);
     if(id==='loomy')return api.startLoomyWechatLoginFlow(options);
@@ -96,14 +95,14 @@ export class AccountHub {
   async remoteModels(id){const c=await this.credential(id),p=products[id],auth=this.service(id);
     if(id==='codearts')return this.protocol.fetchCodeArtsRemoteModels(c,protocolFetch);
     if(id==='cline'){const r=await this.protocol.fetchClineRemoteModels(p,{credential:c,fetcher:protocolFetch});const list=[...(r.entries??[])];for(const item of r.remoteIds??[]){const id=typeof item==='string'?item:item.id;if(id&&!list.some(m=>m.id===id))list.push({id,name:id});}return list;}
-    if(id==='lobsterai'||id==='raccoon')return auth.fetchModels();
+    if(id==='raccoon')return auth.fetchModels();
     if(id==='minimax')return auth.fetchRemoteModelsOnly();
     if(id==='loomy'){const r=await protocolFetch(`${p.apiBase}/models`,{headers:{Accept:'application/json',token:c.access_token}});if(!r.ok)throw new AccountError(`模型目录 HTTP ${r.status}`);return this.protocol.parseLoomyRemoteModels(await r.json());}
     if(id==='zcode')return this.protocol.fetchZcodeModels(c,protocolFetch);
     return null; // Qoder and Gemini use the protocol snapshot's explicit catalogs.
   }
   adapter(id){if(this.adapters.has(id))return this.adapters.get(id);
-    const options={product:products[id],fetchImpl:protocolFetch,...(id==='lobsterai'?{resolveClientVersion:()=>this.service(id).resolveClientVersion()}:{}),resolveCredential:()=>this.credential(id),refresh:()=>this.refresh(id),
+    const options={product:products[id],fetchImpl:protocolFetch,resolveCredential:()=>this.credential(id),refresh:()=>this.refresh(id),
       // Never start the old automated browser/captcha subsystem.
       mintCaptcha:async()=>{throw new AccountError('厂商要求交互验证，请先在官方客户端完成验证再重试');},
       fetchRemoteModels:async()=>{const list=await this.remoteModels(id);return Array.isArray(list)?list:[];},
@@ -120,7 +119,6 @@ export class AccountHub {
   });}
   async balance(id){const epoch=this.epoch(id);return this.run(id,'balance',async()=>{const c=await this.credential(id),p=products[id],f=protocolFetch;let balance;
     if(id==='codearts'){const r=await this.protocol.fetchCodeArtsAccountInfoDetailed(c,f);if(r?.ok===false)throw new AccountError(r.message||'额度查询失败');balance=r?.info?.credit??r?.balance??r?.creditBalance??r;}
-    else if(id==='lobsterai')balance=await this.protocol.fetchLobsteraiCreditBalance(c,p,f);
     else if(id==='qoder'||id==='qodercn')balance=await this.protocol.fetchQoderCreditBalance(c,p,f);
     else if(id==='cline')balance=await this.protocol.fetchClineCreditBalance(c,p,f);
     else if(id==='loomy')balance=await this.protocol.fetchLoomyCreditBalance(c,p,f);
@@ -135,17 +133,20 @@ export class AccountHub {
     this.valid(id,epoch);await this.patch(id,{balance:clean,lastError:null});return clean;
   });}
   async checkin(id){if(!accountChannel(id)?.daily)throw new AccountError('该渠道没有独立的每日签到接口');const key=id+':checkin';if(this.locks.has(key))return this.locks.get(key);
-    const epoch=this.epoch(id),task=this.run(id,'checkin',async()=>{const state=this.state(id),day=shanghaiDay(this.now());if(state.checkin?.day===day&&(!['inactive','status-error'].includes(state.checkin.phase)||state.checkin.retryAt>this.now()))return state.checkin;
+    const epoch=this.epoch(id),task=this.run(id,'checkin',async()=>{const state=this.state(id),day=shanghaiDay(this.now());if(state.checkin?.day===day&&(!['inactive','status-error','previous-period'].includes(state.checkin.phase)||state.checkin.retryAt>this.now()))return state.checkin;
       const c=await this.credential(id),p=products[id],f=protocolFetch;const op=channelOperation.getStore();
-      op.onClaim=async()=>{this.valid(id,epoch);await this.patch(id,{checkin:{day,phase:'claiming',message:'领取已提交，正在确认结果'}});};
+      op.onClaim=async()=>{this.valid(id,epoch);await this.patch(id,{checkin:{day,at:new Date(this.now()).toISOString(),phase:'claiming',message:'领取已提交，正在确认结果'}});};
       let r;
       if(id==='codearts')r=await this.protocol.claimCodeArtsDailyCheckin(c,f);
-      if(id==='lobsterai')r=await this.protocol.claimLobsteraiDailyCheckin(c,p,await this.service(id).resolveClientVersion(),f);
       if(id==='qoder'||id==='qodercn')r=await this.protocol.claimQoderDailyCheckin(c,p,f,this.now());
       if(id==='loomy')r=await this.protocol.claimLoomyDailyQuota(c,p,f);
       if(id==='minimax'){const status=await this.protocol.fetchMinimaxSigninStatus(c,f,p);if(!status)throw new AccountError('签到状态未返回，请稍后重查');r=status.todayCheckedIn?{kind:'already-claimed'}:status.active===false?{kind:'inactive'}:await this.protocol.claimMinimaxDailyCheckin(c,f,p);}
       this.valid(id,epoch);const success=['claimed','already-claimed'].includes(r?.kind)||r?.ok===true||r?.claimed===true||r?.alreadyClaimed===true;
-      const checkin={day,phase:success?'claimed':r?.kind==='inactive'?'inactive':op.claimSent?'uncertain':'status-error',retryAt:success||op.claimSent?0:this.now()+900_000,message:success?'今日签到已完成':r?.kind==='inactive'?'当前没有可领取活动，稍后重新查询':'厂商未确认领取成功，请稍后查看'};
+      const coversToday=r?.coversToday!==false,already=r?.kind==='already-claimed'||r?.alreadyClaimed===true;
+      const checkin={day,at:new Date(this.now()).toISOString(),phase:success?(coversToday?(already?'already-claimed':'claimed'):'previous-period'):r?.kind==='inactive'?'inactive':op.claimSent?'uncertain':'status-error',
+        credit:Number.isFinite(r?.credit)?r.credit:null,unit:typeof r?.unit==='string'?r.unit.slice(0,40):['qoder','qodercn'].includes(id)?'credits':'积分',coversToday,
+        retryAt:success&&coversToday||op.claimSent&&!success?0:this.now()+900_000,
+        message:success?(coversToday?(already?'今天已领取':'今日签到已完成'):'已领取上一周期奖励，稍后检查今日活动'):r?.kind==='inactive'?'当前没有可领取活动，稍后重新查询':'厂商未确认领取成功，请稍后查看'};
       await this.patch(id,{checkin,lastError:null});return checkin;
     }).catch(async e=>{if(this.epoch(id)===epoch){const submitted=this.state(id).checkin?.day===shanghaiDay(this.now())&&this.state(id).checkin?.phase==='claiming';await this.patch(id,{checkin:{day:shanghaiDay(this.now()),phase:submitted?'uncertain':'status-error',retryAt:submitted?0:this.now()+900_000,message:submitted?'领取结果待确认，不自动重复提交':'状态查询失败，稍后重试'}});}throw e;}).finally(()=>this.locks.delete(key));this.locks.set(key,task);return task;}
   async chat(provider,messages,{signal}={}){const id=provider.channelId,epoch=this.epoch(id),key=id+':chat';if(this.locks.has(key))throw new AccountError('该账号正在回复上一条消息');
@@ -162,7 +163,7 @@ export class AccountHub {
       await this.patch(id,{testedAt:new Date(this.now()).toISOString(),lastError:null});return text.trim();
     },signal).finally(()=>this.locks.delete(key));this.locks.set(key,task);return task;
   }
-  async tick(){for(const m of ACCOUNT_CHANNELS){const s=this.state(m.id);if(s.autoCheckin&&s.credential&&(s.checkin?.day!==shanghaiDay(this.now())||(['inactive','status-error'].includes(s.checkin?.phase)&&s.checkin.retryAt<=this.now())))await this.checkin(m.id).catch(()=>{});}}
+  async tick(){for(const m of ACCOUNT_CHANNELS){const s=this.state(m.id);if(s.enabled&&s.autoCheckin&&s.credential&&(s.checkin?.day!==shanghaiDay(this.now())||(['inactive','status-error','previous-period'].includes(s.checkin?.phase)&&s.checkin.retryAt<=this.now())))await this.checkin(m.id).catch(()=>{});}}
   start(){this.ticker=setInterval(()=>void this.tick(),60_000);this.ticker.unref();void this.tick();}
   async stop(){this.stopped=true;this.stopController.abort();clearInterval(this.ticker);await Promise.all([...this.sessions.keys()].map(id=>this.cancel(id)));for(const m of ACCOUNT_CHANNELS)this.epochs.set(m.id,this.epoch(m.id)+1);await Promise.allSettled([...this.locks.values()]);for(const a of this.adapters.values())a.stop?.();}
 }

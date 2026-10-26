@@ -1,6 +1,5 @@
 export const ACCOUNT_CHANNELS = Object.freeze([
   {id:'codearts',name:'CodeArts',brand:'华为云',loginKind:'浏览器授权',daily:true},
-  {id:'lobsterai',name:'LobsterAI',chineseName:'有道龙虾',brand:'网易有道',loginKind:'浏览器授权',daily:true},
   {id:'zcode',name:'ZCode',brand:'智谱',loginKind:'浏览器授权',daily:false},
   {id:'cline',name:'Cline',chineseName:'开源编程助手',brand:'Cline Bot Inc.',loginKind:'设备码',daily:false},
   {id:'loomy',name:'Loomy',brand:'科大讯飞',loginKind:'微信扫码',daily:true},
@@ -25,3 +24,5 @@ export function normalizeAccounts(input) {
   } return out;
 }
 export function publicAccounts(input){const out={};for(const [id,p] of Object.entries(normalizeAccounts(input))){out[id]={...p,credential:undefined,identity:undefined,loggedIn:!!p.credential,nickname:p.credential?.nickname||p.credential?.display_name||p.credential?.account_label||p.credential?.user_name||'',refreshable:!!(p.credential?.refresh_token||p.credential?.bigmodel_refresh_token)};}return out;}
+
+export const REMOVED_CHANNEL_NOTICE = '有道龙虾（LobsterAI · 网易有道）：用户反馈存在封号风险，已移除。';

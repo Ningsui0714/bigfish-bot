@@ -40,7 +40,7 @@ export function normalizeTraeState(value) {
   d.checkin = value.checkin && /^\d{4}-\d{2}-\d{2}$/.test(value.checkin.day) ? {
     day: value.checkin.day, phase: str(value.checkin.phase, 40), at: str(value.checkin.at, 80),
     retryAt: Number.isFinite(value.checkin.retryAt) ? value.checkin.retryAt : 0,
-    credit: Number.isFinite(value.checkin.credit) ? value.checkin.credit : null, message: str(value.checkin.message, 300),
+    credit: Number.isFinite(value.checkin.credit) ? value.checkin.credit : null, unit: 'credits', coversToday: value.checkin.coversToday !== false, message: str(value.checkin.message, 300),
   } : null;
   d.lastError = value.lastError ? str(value.lastError, 300) : null;
   d.authRequired = value.authRequired === true;
@@ -155,7 +155,7 @@ export class TraeClient {
     let response;
     try { response = await this.fetch(`${host}${path}`, { method: 'POST', redirect: 'error', headers, body: JSON.stringify(body),
       signal: AbortSignal.any([this.#stop.signal, AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]) }); }
-    catch { throw new TraeError('TRAE 网络请求失败或超时', 'network'); }
+    catch { signal?.throwIfAborted();this.#stop.signal.throwIfAborted();throw new TraeError('TRAE 网络请求失败或超时', 'network'); }
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       if (response.status === 401) throw new TraeError('TRAE 登录已失效，请重新授权', 'auth-required');
@@ -298,7 +298,7 @@ export class TraeClient {
       const day = shanghaiDay(this.now()), previous = this.state().checkin;
       if (previous?.day === day && (!['inactive', 'status-error'].includes(previous.phase) || previous.retryAt > this.now())) return previous;
       let claimSubmitted = false;
-      const record = patch => this.#patch({ checkin: { day, at: new Date(this.now()).toISOString(), credit: null, ...patch } });
+      const record = patch => this.#patch({ checkin: { day, at: new Date(this.now()).toISOString(), credit: null, unit: 'credits', coversToday: true, ...patch } });
       try {
         await this.credential();
         const status = await this.#authorized(this.profile.credits, TRAE_PATHS.checkStatus, {}, true);
@@ -345,12 +345,12 @@ export class TraeClient {
       catch (e) { e.noFallback = true; throw e; } // Accepted/possibly billed: never reissue on parser/stream failure.
       this.#checkEpoch(epoch); return text;
     } catch (e) {
-      if (epoch === this.#epoch) await this.#patch({ lastError: e instanceof TraeError ? e.message : 'TRAE 调用失败', ...(e.code === 'auth-required' ? { authRequired: true } : {}) });
+      if (epoch === this.#epoch && !signal?.aborted && !this.#stop.signal.aborted) await this.#patch({ lastError: e instanceof TraeError ? e.message : 'TRAE 调用失败', ...(e.code === 'auth-required' ? { authRequired: true } : {}) });
       throw e;
     } finally { this.#busy = false; }
   }
   async tick() {
-    const s = this.state(); if (!s.autoCheckin || !s.credential || s.authRequired || (s.checkin?.day === shanghaiDay(this.now()) && (!['inactive', 'status-error'].includes(s.checkin.phase) || s.checkin.retryAt > this.now()))) return;
+    const s = this.state(); if (!s.enabled || !s.autoCheckin || !s.credential || s.authRequired || (s.checkin?.day === shanghaiDay(this.now()) && (!['inactive', 'status-error'].includes(s.checkin.phase) || s.checkin.retryAt > this.now()))) return;
     await this.checkin();
   }
   start() {

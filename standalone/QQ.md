@@ -4,15 +4,46 @@
 
 两条路径共享已选择的统一模型、人格、接话节奏和显式记忆逻辑，不调用 DSH。默认都不自动上线。路径切换需保存，再连接；保存 / 断开会取消尚未投递的模型回复。官方凭据、OneBot Token 均只在本机加密保存，不返回已保存的明文。
 
-## NapCat / OneBot 11
+## NapCat / OneBot 11：集成启动与扫码
 
-1. 独立安装 NapCat，并在 NapCat 中登录 QQ。
-2. 在网络设置新增 **WebSocket 服务端（正向 WS）**，启用服务，消息格式选择 `array`（数组），设置 Access Token。
-3. 大肥鱼选择「NapCat / OneBot」，填写服务地址（如 `ws://127.0.0.1:3001`）与相同的 Token。该 Token 不是 NapCat WebUI 的登录 Token。
-4. 填入允许的 QQ 群号；私聊需单独开启，并填允许的 QQ 号。
-5. 保存并连接。通过 `get_login_info` 确认实际登录账号后，在白名单群 @ 机器人。
+「QQ 接入 → NapCat」提供三种部署方式；新配置默认选择原生安装，旧配置保留之前选择。
 
-其他标准 OneBot 11 正向 WS 实现可使用同一接口。远程明文 WS 不受支持，远程连接使用 WSS。
+### 原生安装 · 免 Docker（推荐）
+
+1. 点击“下载原生安装包”，大肥鱼自动识别本机系统和 CPU 架构。
+2. 从 NapNeko 官方 GitHub Release 下载固定版本的安装包，显示进度，校验官方 SHA-256 后保存在本机数据目录。重复下载复用通过校验的文件。
+3. Windows / macOS 点击“打开官方安装器”，首次安装与系统授权在官方安装器内完成；不要求手工安装 Docker。
+4. macOS 已安装 QQ.app 时直接复用，安装器会提示 QQ 入口授权；完成首次安装后可关闭安装器，在本页点击“启动 NapCat 并扫码”。大肥鱼后台启动 QQ / NapCat，在页面显示二维码，QQ 上线后自动建立本机 OneBot 通道。
+5. Windows 一键安装器负责部署 QQ 与 NapCat，运行生成目录的 `napcat.bat`；管理 Token 可在“高级管理配置”填写。
+6. Linux 提供包含 QQ 的对应架构 AppImage，打开下载目录，按页面命令运行。仍需要系统提供 `xvfb-run` / `xauth`；大肥鱼不静默执行 sudo 安装系统软件。
+
+原生安装包保存在 `standalone/data/napcat-native/`；QQ 账号、NapCat 配置与日志保留在其原生数据目录，不重定向到项目目录。首次 QQ 入口授权仍由官方安装器完成。macOS 后台启动会先明确提示 `--no-sandbox` 对当前 QQ 进程 Chromium 沙盒的影响，确认后才启动。关闭大肥鱼会停止它自己启动的 QQ / NapCat，不会停止外部实例或其他 QQ。
+
+已运行的外部 NapCat 可以直接复用；首次粘贴一次 WebUI 链接或管理 Token，大肥鱼加密保存。后台托管启动使用上游 `NAPCAT_WEBUI_SECRET_KEY`、`NAPCAT_WEBUI_PREFERRED_PORT` 配置凭据和首选端口，并识别实际启动端口；无需读取受保护的 QQ 配置目录，也不再打开终端。
+
+来源：[NapCat 官方 Shell 安装说明](https://napneko.github.io/guide/boot/Shell)、[macOS 官方安装器](https://github.com/NapNeko/NapCat-Mac-Installer)、[Linux AppImage](https://github.com/NapNeko/NapCatAppImageBuild)。
+
+### Docker · 可选
+
+1. 安装并启动 Docker / Docker Compose；macOS 使用 Docker Desktop 或兼容引擎。
+2. 点击「下载并启动 NapCat」。首次会从 NapCat 项目使用的 `mlikiowa/napcat-docker:latest` 下载镜像，创建本应用独立的 Compose 实例。
+3. 本页展示 QQ 登录二维码；用手机 QQ 扫码并确认。登录成功后自动连接 OneBot。
+4. 如配置变更导致 WS 尚未连接，点击「自动配置本机 OneBot 并连接」。
+5. 添加群 / 联系人白名单，保存并重新连接。
+
+默认 WebUI 6099、OneBot 3001；可修改本机映射端口。容器端口固定为 6099 / 3001，发布到主机的端口只绑定 `127.0.0.1`。实例不使用 privileged，不挂载 Docker socket，不修改别的 NapCat / AstrBot 实例。
+
+运行数据在 `standalone/data/napcat/`，包括 Compose 文件、NapCat 配置、QQ 登录目录和插件目录。应用管理凭据加密保存在主状态中；NapCat 自己所需的配置为其本地私有文件，目录权限 0700、生成文件 0600，整个数据目录已被 Git 排除。
+
+关闭大肥鱼会停止状态跟踪，但容器作为独立服务继续运行；点击「停止内置 NapCat」停止本应用拥有的实例，保留 QQ 登录文件，不删除数据。
+
+### 连接已有 NapCat
+
+填写 WebUI 服务地址与管理 Token，点击「获取登录二维码 / 查询状态」。后端按 NapCat WebUI 的 SHA256(Token + `.napcat`) 登录协议取得临时管理凭据，前端显示本地生成的二维码，不展示已保存的 Token。启用了两步验证的服务可输入当前验证码。
+
+已有 OneBot 连接仍在高级设置中填写正向 WS 地址与 Access Token。**WebUI Token 和 OneBot Token 是两套凭据**。远端管理地址使用 HTTPS。自动新增 OneBot 通道仅用于本机实例，且保留原有其他通道；远端在自己的 NapCat 管理页配置。
+
+内置管理借鉴 AstrBot + NapCat 的独立服务部署结构，并未把 AstrBot 或 NapCat 源码打进大肥鱼。研究与来源见 [AstrBot / NapCat 集成记录](../docs/astrbot-napcat.md)。
 
 ## 官方 QQ Bot（默认扫码 + WebSocket 直连）
 
@@ -74,3 +105,24 @@ npm start
 本次改动前备份：`/tmp/bigfish-qq-paths-originals/`。这不是整个仓库备份；保留已有用户改动。加密业务数据未为测试替换或清空。
 
 扫码功能追加备份：`/tmp/bigfish-qq-qr-originals/`。Connector 为外部 npm 依赖，许可证元数据 UNLICENSED，本仓库不复制其实现源码。
+
+
+### 点击“下载并启动 NapCat”没有反应
+
+这个按钮属于“Docker · 可选”部署。普通用户直接切到“原生安装 · 免 Docker”，不必安装 Docker。Docker 模式会检查本机 Docker / Compose，再拉取镜像并启动容器。
+
+- 若页面显示“尚未安装 Docker”，先安装并启动 Docker Desktop，再点“重新检查并启动 NapCat”。未满足运行环境时不会开始下载镜像。
+- 若显示“Docker 尚未启动”，先启动 Docker 引擎，再检查环境。
+- 本地后台重启后，旧页面的 HttpOnly 会话会失效。界面现已在明确收到本地 HTTP 401 时自动恢复会话并重试一次，不清空正在编辑的表单。
+- 网络超时、400 / 403 / 409 / 429 / 500 不自动重放操作；按钮附近会显示具体错误，避免只在页面顶部出现提示。
+
+2026-10-26 实测：本机后台重启后，不刷新旧 QQ 接入页面直接点击启动，正确进入“需要 Docker 运行环境”，显示“尚未安装 Docker”及安装入口。本机无 Docker，镜像下载与容器启动尚未执行。新增 7 项会话恢复 / HTTP 回归测试，独立版共 110 项通过。
+
+
+### 原生安装验证（2026-10-26）
+
+- 本机 macOS / arm64 实际检测到 `/Applications/QQ.app`，在界面切换并保存原生模式。
+- 页面实际从 NapNeko 下载 `NapCatInstaller_arm64.amd64.zip` v1.7（1,101,125 字节），SHA-256 为 `93537837ae2a5d645393fbe67a758fbaebe93ca2b8cad3a608582c4be12a92a4`，与官方发布记录一致。
+- 用户已在官方安装器完成系统授权及入口切换；本机由大肥鱼后台启动 NapCat 4.18.41 / QQ 7.0.2，真实管理接口鉴权成功，页面已显示真实 QQ 登录二维码。扫码确认需由用户本人完成，尚未实测群聊消息收发。
+- 原生下载 / 打开 / HTTP、托管进程生命周期、端口回退、分片启动输出、凭据保密、外部实例复用及 OneBot 自动配置均有测试。独立版共 180 项通过；Windows / Linux 执行链为协议与命令替身覆盖，后台托管启动当前只适配 macOS。
+- 修改前文件副本：`/tmp/bigfish-native-napcat-originals/`。

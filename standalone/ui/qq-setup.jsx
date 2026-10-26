@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import { NapcatPanel } from './napcat-panel.jsx';
 
 const choices = [
-  { id: 'napcat', title: 'NapCat / OneBot', tag: '个人 QQ', text: '通过已登录的 QQ 账号接入，适合自然群聊与旁听接话。' },
+  { id: 'napcat', title: 'NapCat / OneBot', tag: '个人 QQ', text: '原生免 Docker 安装与个人 QQ 扫码，适合自然群聊与旁听接话。' },
   { id: 'official', title: '官方 QQ Bot', tag: '腾讯开放平台', text: '手机 QQ 扫码绑定，自动保存并直连官方机器人。' },
 ];
 const labels = { disconnected: '已断开', connecting: '正在连接', connected: '已收到有效事件 / 已连接', listening: '回调已监听，等待平台事件', reconnecting: '正在重连', error: '连接失败' };
@@ -14,7 +15,7 @@ function IdList({ value, onChange, ...props }) {
 }
 function Toggle({ checked, onChange, children }) { return <label className="toggle-label"><input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} /><span className="switch" />{children}</label>; }
 
-export function QqSetup({ config, update, status, connect, dirty, binding = { phase: 'idle' }, onBind }) {
+export function QqSetup({ config, update, status, connect, dirty, binding = { phase: 'idle' }, onBind, napcat, nativeNapcat, onNapcatAction }) {
   const q = config.qq, mode = q.mode ?? 'napcat', official = mode === 'official';
   const access = official ? q.official : q;
   const patch = values => update(c => ({ ...c, qq: { ...c.qq, ...values } }));
@@ -37,7 +38,7 @@ export function QqSetup({ config, update, status, connect, dirty, binding = { ph
     </section>
 
     <section className="settings-section">
-      <div className="section-heading"><div><h2>{official ? '扫码接入官方 Bot' : '连接 NapCat'}</h2><p>{official ? '不用手抄 AppID / AppSecret，扫码确认后自动连接。' : '连接 OneBot 11 的 WebSocket 服务端（正向 WS）。'}</p></div></div>
+      <div className="section-heading"><div><h2>{official ? '扫码接入官方 Bot' : '安装 NapCat，扫码登录 QQ'}</h2><p>{official ? '不用手抄 AppID / AppSecret，扫码确认后自动连接。' : '在这里启动实例、获取登录二维码，再自动连接 QQ。'}</p></div></div>
       {official ? <>
         <div className="qq-bind-summary"><span>当前绑定</span><strong>{q.official.hasSecret ? `AppID · ${q.official.appId}` : '还没有绑定机器人'}</strong><small>默认 WebSocket 直连，无需公网 IP 或回调隧道。</small></div>
         <div className="qq-connect-actions"><button className="primary" disabled={busy || bindingActive} onClick={() => bind('login')}>{busy ? '准备中…' : q.official.hasSecret ? '重新扫码绑定' : '获取 QQ 绑定二维码'}</button>{bindingActive && <button disabled={busy || binding.phase === 'saving'} onClick={() => bind('cancel-login')}>取消扫码</button>}</div>
@@ -54,7 +55,7 @@ export function QqSetup({ config, update, status, connect, dirty, binding = { ph
         {q.official.hasSecret && <Toggle checked={q.official.clearSecret === true} onChange={v => patchAccess({ clearSecret: v, appSecret: '' })}>清除已保存的 AppSecret</Toggle>}
         {webhook && <div className="qq-callback"><small>公网 HTTPS 仅转发此回调地址</small><code>http://127.0.0.1:{q.official.port}/qqbot</code><p>本机地址不能直接填到开放平台；需使用你自己的 HTTPS 反向代理或隧道。不要转发 3210 管理端口。</p></div>}
         </details>
-      </> : <div className="form-grid"><Field label="正向 WebSocket 地址" help="不是 NapCat WebUI 地址，也不是反向 WS。"><input value={q.url} onChange={e => patch({ url: e.target.value })} placeholder="ws://127.0.0.1:3001" /></Field><Field label="OneBot Access Token" help={q.hasToken ? '已保存，留空保留；不是 NapCat WebUI 的登录 Token。' : '与 NapCat 网络配置中的 Token 保持一致。'}><input type="password" autoComplete="new-password" value={q.token ?? ''} onChange={e => patch({ token: e.target.value, clearToken: false })} placeholder={q.hasToken ? '已保存，留空保留' : 'Access Token'} /></Field>{q.hasToken && <Toggle checked={q.clearToken === true} onChange={v => patch({ clearToken: v, token: '' })}>清除已保存的 Access Token</Toggle>}</div>}
+      </> : <><NapcatPanel settings={q.napcat} state={napcat} nativeState={nativeNapcat} onChange={v=>patch({napcat:{...q.napcat,...v}})} onAction={onNapcatAction}/><details className="qq-manual"><summary>高级设置 · 已有 OneBot 正向 WS 连接</summary><div className="form-grid"><Field label="正向 WebSocket 地址" help="不是 NapCat WebUI 地址，也不是反向 WS。"><input value={q.url} onChange={e => patch({ url: e.target.value })} placeholder="ws://127.0.0.1:3001" /></Field><Field label="OneBot Access Token" help={q.hasToken ? '已保存，留空保留；不是 NapCat WebUI 的登录 Token。' : '与 NapCat 网络配置中的 Token 保持一致。'}><input type="password" autoComplete="new-password" value={q.token ?? ''} onChange={e => patch({ token: e.target.value, clearToken: false })} placeholder={q.hasToken ? '已保存，留空保留' : 'Access Token'} /></Field>{q.hasToken && <Toggle checked={q.clearToken === true} onChange={v => patch({ clearToken: v, token: '' })}>清除已保存的 Access Token</Toggle>}</div></details></>}
       <div className="qq-connect-actions"><button className={official ? '' : 'primary'} disabled={busy || dirty || bindingActive || (official && !q.official.hasSecret) || (samePath && running)} onClick={() => act('connect')}>{busy ? '处理中…' : official ? '连接已绑定 Bot' : '连接 NapCat'}</button><button disabled={busy || !running || binding.phase === 'saving'} onClick={() => act('disconnect')}>断开连接</button></div>
       {dirty && <p className="muted">先保存底部设置，再连接。保存会断开当前 QQ 会话。</p>}
       <div role="status" className="qq-status"><strong>{(running ? status.mode : mode) === 'official' ? '官方 Bot' : 'NapCat'} · {labels[status.state] ?? status.state}</strong>{status.selfId && <span>{status.name} · {status.selfId}</span>}{status.lastEventAt && <small>最近有效回调：{new Date(status.lastEventAt).toLocaleString('zh-CN')}</small>}{status.error && <p role="alert">{status.error}</p>}{!samePath && running && <p>当前运行的是另一条路径；保存后再连接所选路径。</p>}</div>
@@ -62,9 +63,9 @@ export function QqSetup({ config, update, status, connect, dirty, binding = { ph
 
     <section className="settings-section"><h2>{official ? '官方 OpenID 白名单' : '群聊与私聊白名单'}</h2><p className="muted">{official ? '官方 OpenID 不是 QQ 号。先连接并向机器人发消息，可在下方查看收到的群 / 用户标识。' : '仅回复白名单中的群与联系人；逗号、空格或换行分隔。'}</p>
       <div className="form-grid"><Field label={official ? '允许的群 OpenID' : '允许的 QQ 群号'}><IdList key={`${mode}-groups`} value={access.allowedGroupIds} onChange={v => patchAccess({ allowedGroupIds: v })} placeholder={official ? 'group_openid' : '例如：123456789'} /></Field><Field label={official ? '允许的用户 OpenID' : '允许私聊的 QQ 号'}><IdList key={`${mode}-users`} value={access.allowedUserIds} onChange={v => patchAccess({ allowedUserIds: v })} placeholder={official ? 'user_openid / member_openid' : '例如：123456789'} /></Field></div>
-      <Toggle checked={access.privateEnabled} onChange={v => patchAccess({ privateEnabled: v })}>启用白名单私聊</Toggle>
-      {!!peers.length && <div className="qq-peers"><h3>最近收到的会话标识</h3><small>只展示标识，不展示消息正文；加入后仍需保存并重新连接。</small>{peers.map((p, i) => {const field=p.kind==='group'?'allowedGroupIds':'allowedUserIds',id=p.groupId??p.userId,added=access[field].includes(id);return <div className="qq-peer" key={`${p.groupId}-${p.userId}-${i}`}><span>{p.kind === 'group' ? '群' : '私聊'}<code>{id}</code>{p.kind === 'group' && <small>成员：{p.userId}</small>}</span><button disabled={added} onClick={() => patchAccess({ [field]: [...new Set([...access[field], id])] })}>{added ? '已加入' : '加入白名单'}</button></div>;})}</div>}
+      <div className="qq-private-setting"><h3>私聊回复 <small>{access.privateEnabled ? '已开启' : '已关闭'}</small></h3><Toggle checked={access.privateEnabled} onChange={v => patchAccess({ privateEnabled: v })}>启用白名单私聊</Toggle><p className="muted">{!access.privateEnabled ? '私聊开关已关闭，即使 QQ 已连接也不会回复私聊。' : !access.allowedUserIds.length ? '私聊已开启，但还没有允许的 QQ 号；在上方填写或从最近会话加入。' : `已允许 ${access.allowedUserIds.length} 位联系人私聊；其他联系人不会触发回复。`}</p></div>
+      {!!peers.length && <div className="qq-peers"><h3>最近收到的会话标识</h3><small>只展示标识，不展示消息正文；加入后仍需保存并重新连接。</small>{peers.map((p, i) => {const field=p.kind==='group'?'allowedGroupIds':'allowedUserIds',id=p.groupId??p.userId,added=access[field].includes(id);return <div className="qq-peer" key={`${p.groupId}-${p.userId}-${i}`}><span>{p.kind === 'group' ? '群' : '私聊'}<code>{id}</code>{p.kind === 'group' && <small>成员：{p.userId}</small>}</span><button disabled={added&&(p.kind!=='c2c'||access.privateEnabled)} onClick={() => patchAccess({ [field]: [...new Set([...access[field], id])], ...(p.kind==='c2c'?{privateEnabled:true}:{}) })}>{added&&(p.kind!=='c2c'||access.privateEnabled) ? '已加入' : p.kind==='c2c'?'允许此人私聊':'加入白名单'}</button></div>;})}</div>}
     </section>
-    <section className="settings-section guide"><h2>{official ? '官方 Bot 接入步骤' : 'NapCat 接入步骤'}</h2>{official ? <><ol><li>点击“获取 QQ 绑定二维码”，用手机 QQ 扫码并确认绑定你管理的机器人。</li><li>凭据会加密保存并自动用 WebSocket 连接，无需手抄密钥或配置公网回调。</li><li>向机器人发消息，在下方会话标识里将群 / 用户 OpenID 加入白名单。</li><li>保存设置，点击“连接已绑定 Bot”，在 QQ 内测试聊天。</li></ol><p>扫码绑定成功不等于消息已收发成功，以连接状态和实际回复为准。只有高级设置选择 Webhook 时才需要公网 HTTPS；普通群聊旁听取决于官方授权的消息范围。</p></> : <><ol><li>独立安装 NapCat 并登录 QQ，本应用不内置 QQ 客户端。</li><li>在 NapCat 新建“WebSocket 服务端”，消息格式选择“数组”，设置 Access Token。</li><li>填写正向 WS 地址和同一个 Token，添加群白名单。</li><li>保存设置并连接，检查显示的 QQ 账号，再在群里 @ 大肥鱼测试。</li></ol><p>兼容标准 OneBot 11 正向 WebSocket。两条路径均支持文字群聊和私聊，暂不处理图片、语音、文件或好友申请。</p></>}</section>
+    <section className="settings-section guide"><h2>{official ? '官方 Bot 接入步骤' : 'NapCat 接入步骤'}</h2>{official ? <><ol><li>点击“获取 QQ 绑定二维码”，用手机 QQ 扫码并确认绑定你管理的机器人。</li><li>凭据会加密保存并自动用 WebSocket 连接，无需手抄密钥或配置公网回调。</li><li>向机器人发消息，在下方会话标识里将群 / 用户 OpenID 加入白名单。</li><li>保存设置，点击“连接已绑定 Bot”，在 QQ 内测试聊天。</li></ol><p>扫码绑定成功不等于消息已收发成功，以连接状态和实际回复为准。只有高级设置选择 Webhook 时才需要公网 HTTPS；普通群聊旁听取决于官方授权的消息范围。</p></> : <><ol><li>优先选择“原生安装 · 免 Docker”，下载对应系统的官方安装包；Docker 仅为可选部署。</li><li>在本页获取二维码，用手机 QQ 扫码确认，QQ 上线后自动尝试连接。</li><li>需要时点击“自动配置本机 OneBot 并连接”；原有其他 NapCat 通道会保留。</li><li>添加允许的群 / 联系人，保存并重新连接，在 QQ 里测试接话。</li></ol><p>兼容标准 OneBot 11 正向 WebSocket。两条路径均支持文字群聊和私聊，暂不处理图片、语音、文件或好友申请。</p></>}</section>
   </>;
 }

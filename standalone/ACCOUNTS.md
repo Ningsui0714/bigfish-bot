@@ -2,12 +2,11 @@
 
 ## 本次接入范围
 
-从旧项目仍使用的协议适配中迁移 10 个渠道，加上原有 TRAE。CodeBuddy / WorkBuddy 在旧项目的 `LOGIN_PROVIDERS` 中已退役，未恢复成可用入口。
+从旧项目仍使用的协议适配中保留 9 个渠道，加上原有 TRAE。CodeBuddy / WorkBuddy 在旧项目的 `LOGIN_PROVIDERS` 中已退役，未恢复成可用入口。
 
 | 渠道 | 登录入口 | 模型目录 | 独立每日签到 |
 | --- | --- | --- | --- |
 | CodeArts | 浏览器 OAuth + 本机回调 | 厂商目录 | 支持 |
-| 有道 LobsterAI | 浏览器 OAuth + 本机回调 | 厂商目录 | 支持 |
 | 智谱 ZCode | 服务端中介授权 + 轮询 | 厂商目录 | 本次不自动处理交互验证 |
 | Cline | WorkOS 设备码 | 厂商目录，保留 free / pass 命名空间 | 无独立接口 |
 | 讯飞 Loomy | 微信扫码 / 绑定表单 | 厂商目录 | 每日额度 |
@@ -66,7 +65,7 @@
 
 `activeModelId` 与 `modelMaxOutputTokens` 独立保存；原有主模型自动迁移，不清除登录态。只在同一个逻辑模型的已登录、已启用渠道之间选路；当前渠道明确拒绝可换同模型的其他渠道，不降级成别的型号。已接受或结果不明的推理失败不盲目重发，避免重复消耗。一个渠道有多个日期别名时，本轮最多尝试该渠道一个别名。
 
-“账号统一管理”只有一个厂商下拉框，包含 TRAE 和新增 10 个渠道。选 ZCode 时详情只显示 ZCode；选 TRAE 才显示 TRAE。账号页不再铺所有厂商卡片，也不再另加一块 TRAE 账号或原始厂商模型选择器。API / Ollama 放入折叠的高级配置。
+“账号统一管理”只有一个厂商下拉框，包含 TRAE 和9 个渠道。选 ZCode 时详情只显示 ZCode；选 TRAE 才显示 TRAE。账号页不再铺所有厂商卡片，也不再另加一块 TRAE 账号或原始厂商模型选择器。API / Ollama 放入折叠的高级配置。
 
 HTTP：`GET /api/state` 返回不含密钥的 `modelCatalog`；`POST /api/models/refresh` 只更新已登录账号目录（不发起推理）；`POST /api/models/test` 对保存的统一模型做一次短调用。原有每账号授权/查询接口保留。
 
@@ -77,7 +76,6 @@ HTTP：`GET /api/state` 返回不含密钥的 `modelCatalog`；`POST /api/models
 | --- | --- |
 | trae | TRAE · 字节跳动 |
 | codearts | CodeArts · 华为云 |
-| lobsterai | LobsterAI · 有道龙虾 · 网易有道 |
 | zcode | ZCode · 智谱 |
 | cline | Cline · 开源编程助手 · Cline Bot Inc. |
 | loomy | Loomy · 科大讯飞 |
@@ -92,3 +90,10 @@ HTTP：`GET /api/state` 返回不含密钥的 `modelCatalog`；`POST /api/models
 厂商归属核验参考：[阿里云 Qoder CN 文档](https://www.alibabacloud.com/help/en/lingma/introduction-of-lingma)、[阿里云 Qoder 产品页](https://www.alibabacloud.com/en/marketplace/qoder)、[MiniMax 隐私政策](https://agent.minimaxi.com/doc/zh/privacy-policy.html)、[Cline 官方隐私声明](https://cline.bot/privacy)。厂商显示用于辨认来源，不替代用户与各产品的实际服务合同主体。
 
 最终实机验证：统一入口 `POST /api/models/test` HTTP 200，返回 `OK`，逻辑模型 `deepseek-v4.1-flash`、实际渠道 `trae-cn`。原有 TRAE 登录态、26 项目录和自动签到保持。界面选择 `ZCode · 智谱` 后仅有 ZCode 详情面板，TRAE 只作为下拉选项存在；截图 `design/accounts-unified.png`。新增厂商尚未由用户完成真实登录，不把 fixture 测试视作生产账号调用成功。
+
+
+## 渠道移除与统一签到中心
+
+有道龙虾（LobsterAI · 网易有道）：用户反馈存在封号风险，已移除。登录、模型路由、额度查询、每日签到均不再提供该渠道；旧加密配置会自动排除其活跃配置，不影响其他账号。原始加密备份保留。
+
+签到入口改为“每日领鱼粮”统一批处理，支持总开关、逐账号开关、逐渠道结果和停止后续任务。详细行为和验证见 [每日签到中心](../docs/daily-benefits.md)。

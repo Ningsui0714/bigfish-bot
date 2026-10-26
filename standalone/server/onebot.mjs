@@ -48,7 +48,7 @@ export class OneBot {
         else pending.reject(new Error(`OneBot 动作失败（${Number(e.retcode) || '未知'}）`));
       } else if (this.status.state === 'connected') { void Promise.resolve(this.onEvent(e)).catch(() => {}); }
     });
-    ws.on('error', () => { if (ws === this.#ws) this.#set({ error: '连接失败，请检查 NapCat 正向 WS、地址与 Access Token' }); });
+    ws.on('error', error => { if (ws === this.#ws) this.#set({ error: error.code === 'ECONNREFUSED' ? 'NapCat 通信服务尚未启动，请先启动 NapCat 并扫码登录' : /401|403/.test(error.message) ? 'NapCat 拒绝连接，请核对 OneBot Access Token' : 'NapCat 连接未完成，请检查正向 WS 地址、网络与服务状态' }); });
     ws.on('close', () => {
       if (ws !== this.#ws) return;
       this.#rejectPending();

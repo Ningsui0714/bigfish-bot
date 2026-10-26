@@ -16,7 +16,7 @@ const json=d=>new Response(JSON.stringify(d),{headers:{'Content-Type':'applicati
 const sse=frames=>new Response(frames.map(f=>`data: ${typeof f==='string'?f:JSON.stringify(f)}\n\n`).join(''),{headers:{'Content-Type':'text/event-stream'}});
 const p=(channelId,model='fixture-model')=>({id:`account-${channelId}`,name:channelId,type:'account',channelId,model,enabled:true});
 async function fixture(fn,opts={}){const dir=await fs.mkdtemp(join(tmpdir(),'bigfish-accounts-'));const store=await new LocalStore(dir).load();const hub=new AccountHub({store,...opts});try{await fn({store,hub,dir});}finally{await hub.stop();await fs.rm(dir,{recursive:true,force:true});}}
-test('all ten migrated channels expose real features and start disconnected',()=>{const h=new AccountHub({store:{get:defaults}});assert.equal(h.statuses().length,10);assert.ok(h.statuses().every(s=>!s.loggedIn&&!s.testedAt&&!s.autoCheckin));assert.equal(h.statuses().find(s=>s.id==='zcode').daily,false);});
+test('all nine active channels expose real features and start disconnected',()=>{const h=new AccountHub({store:{get:defaults}});assert.equal(h.statuses().length,9);assert.ok(h.statuses().every(s=>!s.loggedIn&&!s.testedAt&&!s.autoCheckin));assert.equal(h.statuses().find(s=>s.id==='zcode').daily,false);});
 test('account credentials are encrypted, reloadable, masked, and immune to config injection',async()=>fixture(async({store,dir})=>{
  await store.patchAccount('cline',{credential});await store.update({accounts:{cline:{autoCheckin:true,credential:{access_token:'forged'}}}});
  assert.equal(store.get().accounts.cline.credential.access_token,credential.access_token);assert.equal(store.get().accounts.cline.autoCheckin,false);
@@ -73,7 +73,7 @@ test('check-in distinguishes status failure from uncertain submitted claim',asyn
 });
 test('HTTP account routes enforce same-origin auth and do not expose the old gateway',async()=>{
  const dir=await fs.mkdtemp(join(tmpdir(),'bigfish-account-http-'));const app=await createApplication({dataDir:dir});app.server.listen(0,'127.0.0.1');await new Promise(r=>app.server.once('listening',r));const base=`http://127.0.0.1:${app.server.address().port}`;
- try{const home=await fetch(base),cookie=home.headers.get('set-cookie').split(';')[0];const state=await(await fetch(base+'/api/state',{headers:{cookie}})).json();assert.equal(state.accounts.length,10);
+ try{const home=await fetch(base),cookie=home.headers.get('set-cookie').split(';')[0];const state=await(await fetch(base+'/api/state',{headers:{cookie}})).json();assert.equal(state.accounts.length,9);
  const r=await fetch(base+'/api/accounts/cline/models',{method:'POST',headers:{cookie,origin:base,'Content-Type':'application/json'},body:'{}'});assert.equal(r.status,400);assert.match((await r.json()).error,/先完成/);
  assert.equal((await fetch(base+'/v1/chat/completions')).status,404);assert.equal((await fetch(base+'/api/accounts/cline/login',{method:'POST',headers:{cookie,origin:'https://evil.test','Content-Type':'application/json'},body:'{}'})).status,403);
  }finally{await app.close();await fs.rm(dir,{recursive:true,force:true});}

@@ -1,3 +1,6 @@
+import { NativeNapcatRuntime, parseNativeBinding } from './napcat-runtime.mjs';
+import { NativeNapcat } from './napcat-native.mjs';
+import { DailyBenefits } from './benefits.mjs';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import { join, dirname, resolve, extname } from 'node:path';
@@ -7,6 +10,7 @@ import { LocalStore } from './store.mjs';
 import { SocialAgent } from './agent.mjs';
 import { QqConnection } from './qq.mjs';
 import { QqBinding } from './qq-binding.mjs';
+import { NapcatManager } from './napcat.mjs';
 import { TraeClient } from './trae.mjs';
 import { unifiedModels } from './model-catalog.mjs';
 import { AccountHub } from './accounts.mjs';
@@ -15,13 +19,14 @@ import { completion } from './providers.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const equal = (a, b) => { const x = Buffer.from(a ?? ''), y = Buffer.from(b ?? ''); return x.length === y.length && timingSafeEqual(x, y); };
-export async function createApplication({ dataDir = process.env.BIGFISH_DATA_DIR || join(root, 'data'), model, fetchImpl, officialBotFactory, qrStart } = {}) {
+export async function createApplication({ dataDir = process.env.BIGFISH_DATA_DIR || join(root, 'data'), model, fetchImpl, officialBotFactory, qrStart, napcatRun, napcatFetch, nativeNapcatOptions, nativeRuntimeOptions, agentPlugins } = {}) {
   const store = await new LocalStore(dataDir).load();
   const trae = new TraeClient({ store, fetchImpl });
   const accounts = new AccountHub({store, fetchImpl});
-  accounts.start();
-  const agent = new SocialAgent({ store, model: model ?? ((config, messages, options) => generate(config, messages, { ...options, fetchImpl, trae, accounts })) });
-  trae.start();
+  const benefits = new DailyBenefits({store,accounts,trae});
+  benefits.start();
+  const agent = new SocialAgent({ store, plugins:agentPlugins, model: model ?? ((config, messages, options) => generate(config, messages, { ...options, fetchImpl, trae, accounts })) });
+
   const qq = new QqConnection({ officialBotFactory, onMessage: async (m, send) => {
     try { await agent.receive(m, { send }); }
     catch { agent.log('qq-turn-failed'); }
@@ -38,6 +43,18 @@ export async function createApplication({ dataDir = process.env.BIGFISH_DATA_DIR
       revision++; agent.reset(); qq.connect(store.get().qq);
     } finally { saving = false; }
   } });
+  const nativeRuntime = new NativeNapcatRuntime({dataDir,...nativeRuntimeOptions});
+  const nativeNapcat = new NativeNapcat({dataDir,...nativeNapcatOptions});
+  const napcat = new NapcatManager({store,dataDir,run:napcatRun,fetchImpl:napcatFetch,onPrepare:async()=>{
+    if(saving||qqBinding.committing)throw new Error('配置正在保存，请稍候');
+    saving=true;
+    try{
+      const q=store.get().qq,n=q.napcat;
+      if(q.mode!=='napcat'||n.deployment!=='managed')throw new Error('请先选择并保存内置管理的 NapCat');
+      await store.update({qq:{url:`ws://127.0.0.1:${n.wsPort}`,token:q.token||randomBytes(24).toString('hex'),napcat:{webuiUrl:`http://127.0.0.1:${n.webPort}`,webuiToken:n.webuiToken||randomBytes(24).toString('hex')}}});
+      revision++;agent.reset();qq.stop();return store.get().qq;
+    }finally{saving=false;}
+  },onReady:async()=>{if(store.get().qq.mode==='napcat'){agent.reset();qq.connect(store.get().qq);}}});
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
   async function body(req) {
     const chunks = []; let size = 0;
@@ -59,17 +76,75 @@ export async function createApplication({ dataDir = process.env.BIGFISH_DATA_DIR
       if (!equal(cookie, token)) return json(res, 401, { error: '请从本地界面访问' });
       if (req.method !== 'GET' && (!origin || req.headers['content-type']?.split(';')[0] !== 'application/json')) return json(res, 403, { error: '操作需要同源 JSON 请求' });
       try {
-        if (req.method === 'GET' && url.pathname === '/api/state') return json(res, 200, { config: store.publicConfig(), modelCatalog: unifiedModels(store.get()), trae: trae.status(), accounts: accounts.statuses(), qq: qq.status, qqBinding: qqBinding.status(), events: agent.events.slice(-30), revision });
+        if (req.method === 'GET' && url.pathname === '/api/state') return json(res, 200, { config: store.publicConfig(), modelCatalog: unifiedModels(store.get()), trae: trae.status(), accounts: accounts.statuses(), benefits: benefits.status(), qq: qq.status, qqBinding: qqBinding.status(), napcat:napcat.status(), nativeNapcat:{...nativeNapcat.status(),runtime:nativeRuntime.status()}, agent:agent.status(), events: agent.events.slice(-30), revision });
         if (req.method === 'GET' && url.pathname === '/api/memories') return json(res, 200, { items: agent.memories(), revision });
+        if(req.method==='POST'&&url.pathname==='/api/personas/delete'){
+          const input=await body(req);
+          if(saving||qqBinding.committing||input.revision!==revision)return json(res,409,{error:'配置已改变或正在保存，请刷新后重试'});
+          if(input.confirmed!==true)throw new Error('请先确认删除人格及其独立记忆');
+          saving=true;
+          try{const wasActive=store.get().activePersonaId===input.id;const config=await store.deletePersona(input.id);revision++;agent.personaDeleted(input.id,wasActive);return json(res,200,{config,revision});}
+          finally{saving=false;}
+        }
         if (req.method === 'PUT' && url.pathname === '/api/config') {
           const input = await body(req);
           if (saving || qqBinding.committing || input.revision !== revision) return json(res, 409, { error: '配置已改变或正在保存，请刷新后重试' });
-          qqBinding.cancel();
           saving = true;
           try {
-            const config = await store.update(input.config); revision++; agent.reset(); qq.stop();
+            const previousQq=store.get().qq;
+            const config = await store.update(input.config); revision++; agent.reset();
+            // Personality, memory and model changes must not tear down a healthy
+            // QQ login. Only transport/access changes require reconnection.
+            if(JSON.stringify(previousQq)!==JSON.stringify(store.get().qq)){qqBinding.cancel();napcat.cancel();qq.stop();}
             return json(res, 200, { config, revision });
           } finally { saving = false; }
+        }
+        if(req.method==='POST'&&url.pathname.startsWith('/api/napcat/')){
+          const input=await body(req),action=url.pathname.slice('/api/napcat/'.length);
+          if(saving||qqBinding.committing)throw new Error('配置正在保存，请稍候');
+          if(action==='native-check'){await nativeRuntime.check(store.get().qq);return json(res,200,{nativeNapcat:await nativeNapcat.check(),nativeRuntime:nativeRuntime.status()});}
+          if(action==='check')return json(res,200,{napcat:await napcat.checkRuntime()});
+          if(store.get().qq.mode!=='napcat')throw new Error('请先选择并保存 NapCat 接入方式');
+          if(action.startsWith('native-')){
+            if(store.get().qq.napcat.deployment!=='native')throw new Error('请先选择并保存原生安装方式');
+            if(action==='native-download')return json(res,202,{nativeNapcat:nativeNapcat.download()});
+            if(action==='native-open')return json(res,200,{nativeNapcat:await nativeNapcat.open()});
+            if(action==='native-cancel')return json(res,200,{nativeNapcat:nativeNapcat.cancel()});
+            if(action==='native-stop'){napcat.cancel();qq.stop();return json(res,200,{nativeRuntime:await nativeRuntime.stop()});}
+            if(action==='native-start'){
+              const q=store.get().qq;
+              return json(res,202,{nativeRuntime:nativeRuntime.start(q,{confirmNoSandbox:input.confirmNoSandbox===true,
+                onPrepared:async()=>{
+                  if(saving||qqBinding.committing)throw new Error('配置正在保存，请稍候');
+                  saving=true;
+                  try{await store.update({qq:{token:q.token||randomBytes(24).toString('hex'),napcat:{webuiToken:q.napcat.webuiToken||randomBytes(24).toString('hex')}}});revision++;agent.reset();qq.stop();return store.get().qq;}
+                  finally{saving=false;}
+                },onBinding:async binding=>{
+                  if(saving||qqBinding.committing)throw new Error('配置正在保存，请重新连接 NapCat');
+                  saving=true;
+                  try{await store.update({qq:{napcat:binding}});revision++;}finally{saving=false;}
+                },onReady:()=>{napcat.openLogin();}
+              })});
+            }
+            if(action==='native-connect'||action==='native-pair'){
+              const q=store.get().qq;
+              const local=action==='native-pair'?parseNativeBinding(input.linkOrToken,q.napcat.webuiUrl):
+                q.napcat.webuiToken?null:await nativeNapcat.localWebui();
+              if(!local&&!q.napcat.webuiToken)throw new Error('NapCat 已启动但尚未绑定：请粘贴一次控制台 WebUI 链接，之后会加密记住，无需每次填写');
+              const target=new URL(local?.webuiUrl??q.napcat.webuiUrl);
+              if(!['127.0.0.1','localhost','[::1]'].includes(target.hostname))throw new Error('原生模式只连接本机服务；远端服务请选择连接已有 NapCat');
+              saving=true;
+              try{napcat.cancel();await store.update({qq:{token:q.token||randomBytes(24).toString('hex'),...(local?{napcat:local}:{})}});revision++;agent.reset();qq.stop();}
+              finally{saving=false;}
+              return json(res,200,{napcat:napcat.openLogin(),revision});
+            }
+          }
+          if(action==='start'){if(store.get().qq.napcat.deployment!=='managed')throw new Error('请先选择“大肥鱼管理实例”');agent.reset();qq.stop();return json(res,200,{napcat:napcat.startManaged()});}
+          if(action==='login')return json(res,200,{napcat:napcat.openLogin(typeof input.totpCode==='string'&&/^\d{6}$/.test(input.totpCode)?input.totpCode:undefined)});
+          if(action==='refresh-qr')return json(res,200,{napcat:await napcat.refreshQr()});
+          if(action==='configure')return json(res,200,{napcat:await napcat.configureLocalChannel()});
+          if(action==='cancel'){napcat.cancel();return json(res,200,{napcat:napcat.status()});}
+          if(action==='stop'){await napcat.stopManaged();agent.reset();qq.stop();return json(res,200,{napcat:napcat.status()});}
         }
         if (req.method === 'POST' && url.pathname === '/api/qq/login') {
           await body(req);
@@ -84,7 +159,7 @@ export async function createApplication({ dataDir = process.env.BIGFISH_DATA_DIR
           await body(req); if (qqBinding.committing) throw new Error('正在保存扫码结果，请稍候'); qqBinding.cancel(); agent.reset(); qq.connect(store.get().qq); return json(res, 200, { status: qq.status });
         }
         if (req.method === 'POST' && url.pathname === '/api/qq/disconnect') {
-          await body(req); if (qqBinding.committing) throw new Error('正在保存扫码结果，请稍候'); qqBinding.cancel(); agent.reset(); qq.stop(); return json(res, 200, { status: qq.status });
+          await body(req); if (qqBinding.committing) throw new Error('正在保存扫码结果，请稍候'); qqBinding.cancel(); napcat.cancel(); agent.reset(); qq.stop(); return json(res, 200, { status: qq.status });
         }
         if (req.method === 'POST' && url.pathname === '/api/provider/test') {
           const { id } = await body(req), p = store.get().providers.find(p => p.id === id);
@@ -103,8 +178,16 @@ export async function createApplication({ dataDir = process.env.BIGFISH_DATA_DIR
           const results=await Promise.all(jobs.map(async j=>{try{await j.task();return{id:j.id,ok:true};}catch(e){return{id:j.id,ok:false,error:e.message};}}));
           return json(res,200,{models:unifiedModels(store.get()),results});
         }
+        if (req.method === 'POST' && url.pathname.startsWith('/api/benefits/')) {
+          await body(req);
+          if(saving)throw new Error('配置正在保存，请稍候');
+          const action=url.pathname.slice('/api/benefits/'.length);
+          if(action==='run')return json(res,202,{benefits:benefits.launch()});
+          if(action==='stop')return json(res,200,{benefits:benefits.stopRemaining()});
+        }
         if (req.method === 'POST' && url.pathname.startsWith('/api/accounts/')) {
           const input = await body(req), [, , , id, action] = url.pathname.split('/');
+          accounts.state(id);
           if (action === 'login') return json(res, 200, await accounts.login(id));
           if (action === 'cancel-login') {await accounts.cancel(id); return json(res, 200, {ok:true});}
           if (action === 'logout') {await accounts.logout(id); agent.reset(); return json(res, 200, {ok:true});}
@@ -155,7 +238,7 @@ export async function createApplication({ dataDir = process.env.BIGFISH_DATA_DIR
     } catch { json(res, 404, { error: '界面尚未构建，请先运行 npm run build' }); }
   });
   server.requestTimeout = 15_000; server.headersTimeout = 10_000;
-  return { server, store, agent, qq, qqBinding, trae, accounts, close: async () => { await qqBinding.close(); trae.stop(); await accounts.stop(); agent.stop(); qq.stop(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
+  return { server, store, agent, qq, qqBinding, napcat, nativeNapcat, nativeRuntime, trae, accounts, benefits, close: async () => { benefits.stop(); await nativeRuntime.close(); await nativeNapcat.close(); await napcat.close(); await qqBinding.close(); trae.stop(); await accounts.stop(); await benefits.task; agent.stop(); qq.stop(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const app = await createApplication();

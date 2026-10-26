@@ -97,7 +97,6 @@ export function isAutoLane(lane) {
 export const DEFAULT_LANES = Object.freeze([
   { provider: 'codearts', model: AUTO_MODEL, label: 'CodeArts（华为云）' },
   { provider: 'trae', model: AUTO_MODEL, label: 'TRAE（字节）' },
-  { provider: 'lobsterai', model: AUTO_MODEL, label: '有道 LobsterAI' },
   { provider: 'zcode', model: AUTO_MODEL, label: '智谱 ZCode' },
   { provider: 'cline', model: AUTO_MODEL, label: 'Cline' },
   { provider: 'loomy', model: AUTO_MODEL, label: '讯飞 Loomy' },
@@ -170,7 +169,7 @@ export function commitsAnswer(chunk) {
 export function orderLanes(lanes) {
   if (!Array.isArray(lanes)) return [];
   return lanes
-    .filter((lane) => lane && typeof lane.provider === 'string' && lane.provider !== ''
+    .filter((lane) => lane && typeof lane.provider === 'string' && lane.provider !== '' && lane.provider !== 'lobsterai'
       && (typeof lane.model === 'string' || isAutoLane(lane)))
     .map((lane, index) => ({ lane, index }))
     .sort((a, b) => {

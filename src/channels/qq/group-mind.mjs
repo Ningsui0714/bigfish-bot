@@ -53,7 +53,7 @@ export class QqGroupMind {
     }
     if (direct && /^(?:忘记我|清除我的记忆)[。！!]?$/u.test(body)) {
       this.#memories = this.#memories.filter(x => x.room !== message.groupOpenid || x.sender !== message.senderId);
-      room.recent = room.recent.filter(x => x.sender !== message.senderId);
+      this.clearRecent(message);
       return answer('forget', { reply: '已清除本群里你让我记住的内容和近期上下文；已有 DSH 会话历史不在此清除。', memoryChanged: true });
     }
     if (direct && /^(?:你记得我什么|查看我的记忆)[？?。]?$/u.test(body)) {
@@ -112,12 +112,17 @@ export class QqGroupMind {
     }
     return JSON.stringify(data);
   }
+  clearRecent(message) {
+    const room=this.#room(message.groupOpenid);
+    room.recent=room.recent.filter(x=>x.sender!==message.senderId&&(x.sender!=='bot:self'||x.owner!==message.senderId));
+    if(room.actor===message.senderId){room.actor=null;room.lastReply=-Infinity;}
+  }
   isMuted(message) { return this.#room(message.groupOpenid).mutedUntil > this.#now(); }
   delivered(message, text) {
     const room = this.#room(message.groupOpenid);
     room.lastReply = this.#now();
     room.actor = message.senderId;
-    room.recent.push({ sender: 'bot:self', text: clean(text, 1500), at: this.#now() });
+    room.recent.push({ sender: 'bot:self', owner: message.senderId, text: clean(text, 1500), at: this.#now() });
     room.recent = room.recent.slice(-24);
   }
 }

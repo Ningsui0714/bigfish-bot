@@ -1,3 +1,7 @@
+import {mergePersonas,personaMemories,personaConversations,removePersona} from './persona-state.mjs';
+import {scopePersona} from './persona-scope.mjs';
+import { normalizeAgentSettings } from './agent-runtime.mjs';
+import { normalizeBenefits } from './benefits-state.mjs';
 import { canonicalModelId } from './model-catalog.mjs';
 import { normalizeAccounts, publicAccounts, accountChannel } from './channel-state.mjs';
 import { traeDefaults, normalizeTraeState, publicTraeState } from './trae.mjs';
@@ -7,11 +11,13 @@ import { randomBytes, createCipheriv, createDecipheriv, randomUUID } from 'node:
 import { normalizeQqGroupChatbotConfig } from '../../src/channels/qq/qq-mention.mjs';
 import { normalizeSocialMemory } from '../../src/channels/qq/group-mind.mjs';
 
-export const defaults = () => ({ version: 1, providers: [], activeProviderId: '', activeModelId: '', modelMaxOutputTokens: null,
+export const defaults = () => {const data=({ version: 1, providers: [], activeProviderId: '', activeModelId: '', modelMaxOutputTokens: null,
   persona: { ...normalizeQqGroupChatbotConfig(), guidance: normalizeQqGroupChatbotConfig().guidance.replaceAll('海鸥', '大肥鱼').replace('只在明确要求实际执行任务时使用工具；', '你仅参与聊天，不执行工具或代码；') + '\n你的形象是小小一只的蓝发鲸尾 Q 版女仆吉祥物。圆脸、呆毛、抱着饭碗发呆，平时呆萌、贪吃、反应慢半拍，可以偶尔会错意再自己反应过来，但不要每句都演笨蛋。认真问题仍准确回答，不为人设编造事实。不使用成熟暧昧语气，不默认称呼用户为主人，不机械扮演客服，不贬低他人。', nicknames: ['大肥鱼', '肥鱼'], interests: ['电影', '游戏', '音乐', '编程'] },
-  trae: traeDefaults(), accounts: normalizeAccounts(),
+  trae: traeDefaults(), accounts: normalizeAccounts(), benefits: normalizeBenefits(),
+  agent:normalizeAgentSettings(), conversations:[],
   qq: { mode: 'napcat', url: 'ws://127.0.0.1:3001', token: '', allowedGroupIds: [], allowedUserIds: [], privateEnabled: false,
-    official: { appId: '', appSecret: '', transport: 'websocket', port: 3211, allowedGroupIds: [], allowedUserIds: [], privateEnabled: false } }, memories: [] });
+    napcat: { deployment: 'native', webuiUrl: 'http://127.0.0.1:6099', webuiToken: '', webPort: 6099, wsPort: 3001 },
+    official: { appId: '', appSecret: '', transport: 'websocket', port: 3211, allowedGroupIds: [], allowedUserIds: [], privateEnabled: false } }, memories: [] });return {...data,activePersonaId:'default',personas:[{id:'default',name:'大肥鱼',kind:'persona',persona:structuredClone(data.persona),agent:structuredClone(data.agent)}]};};
 const text = (v, max = 4000) => typeof v === 'string' ? v.trim().slice(0, max) : '';
 export function endpoint(value, schemes) {
   let u;
@@ -22,7 +28,7 @@ export function endpoint(value, schemes) {
   }
   return u.toString().replace(/\/$/, '');
 }
-export function mergeConfig(input, current) {
+export function mergeConfig(input, current, {loading=false}={}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('配置必须是对象');
   const next = structuredClone(current);
   if (input.providers !== undefined) {
@@ -61,6 +67,8 @@ export function mergeConfig(input, current) {
     next.accounts = normalizeAccounts(current.accounts);
     for (const [id, value] of Object.entries(input.accounts ?? {})) if (accountChannel(id)) {if(value?.autoCheckin!==undefined)next.accounts[id].autoCheckin=accountChannel(id).daily&&value.autoCheckin===true;if(value?.enabled!==undefined)next.accounts[id].enabled=value.enabled!==false;}
   }
+  if(input.agent!==undefined)next.agent=normalizeAgentSettings({...current.agent,...input.agent});
+  if (input.benefits !== undefined) next.benefits = {...normalizeBenefits(current.benefits),enabled:input.benefits.enabled === undefined ? current.benefits?.enabled !== false : input.benefits.enabled === true};
   if (input.qq !== undefined) {
     const q = input.qq;
     const mode = q.mode ?? current.qq.mode ?? 'napcat';
@@ -80,10 +88,21 @@ export function mergeConfig(input, current) {
     if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('回调端口需为 1024～65535 的整数');
     const appSecret = o.clearSecret === true ? '' : text(o.appSecret, 1024) || (appId === old.appId ? old.appSecret : '');
     if (appSecret && !/^[\x21-\x7e]+$/.test(appSecret)) throw new Error('AppSecret 应为开放平台提供的 ASCII 密钥');
+    const n = q.napcat ?? {}, previousNapcat = current.qq.napcat ?? defaults().qq.napcat;
+    const deployment = n.deployment ?? previousNapcat.deployment;
+    if (!['native', 'managed', 'external'].includes(deployment)) throw new Error('NapCat 请选择原生安装、Docker 或已有服务');
+    const webuiUrl = endpoint(text(n.webuiUrl ?? previousNapcat.webuiUrl), ['http:', 'https:']);
+    const napcatPort = key => {const value=Number(n[key] ?? previousNapcat[key]);if(!Number.isInteger(value)||value<1024||value>65535)throw new Error('NapCat 端口需为 1024～65535 的整数');return value;};
+    const webPort=napcatPort('webPort'),wsPort=napcatPort('wsPort');
+    if(webPort===wsPort)throw new Error('NapCat 管理端口和通信端口应不同');
+    const webuiToken = n.clearToken === true ? '' : text(n.webuiToken,8192) || (webuiUrl===previousNapcat.webuiUrl?previousNapcat.webuiToken:'');
     next.qq = { mode, url, token: q.clearToken === true ? '' : text(q.token, 8192) || (url === current.qq.url ? current.qq.token : ''),
+      napcat: {deployment,webuiUrl,webuiToken,webPort,wsPort},
       allowedGroupIds: ids(q.allowedGroupIds ?? current.qq.allowedGroupIds), allowedUserIds: ids(q.allowedUserIds ?? current.qq.allowedUserIds), privateEnabled: (q.privateEnabled ?? current.qq.privateEnabled) === true,
       official: { appId, appSecret, transport, port, allowedGroupIds: ids(o.allowedGroupIds ?? old.allowedGroupIds, true), allowedUserIds: ids(o.allowedUserIds ?? old.allowedUserIds, true), privateEnabled: (o.privateEnabled ?? old.privateEnabled) === true } };
   }
+  mergePersonas(input,current,next,{allowRemoval:loading});
+  next.conversations=personaConversations(current.conversations,next);
   return next;
 }
 export class LocalStore {
@@ -107,8 +126,14 @@ export class LocalStore {
       d.setAuthTag(packed.subarray(12, 28));
       const data = JSON.parse(Buffer.concat([d.update(packed.subarray(28)), d.final()]).toString());
       if (data.version !== 1) throw new Error('不支持的本地数据版本');
-      this.#data = mergeConfig(data, defaults());
-      this.#data.memories = normalizeSocialMemory(data.memories);
+      // Migrate removed channels without breaking decryption of an older profile.
+      const providers=(data.providers??[]).filter(p=>!(p.type==='account'&&p.channelId==='lobsterai'));
+      const removedPrimary=(data.providers??[]).some(p=>p.type==='account'&&p.channelId==='lobsterai'&&p.id===data.activeProviderId);
+      const activeProviderId=removedPrimary?'':data.activeProviderId??'';
+      this.#data = mergeConfig({...data,providers,activeProviderId}, defaults(),{loading:true});
+      this.#data.benefits = normalizeBenefits(data.benefits);
+      this.#data.memories = personaMemories(data.memories,this.#data);
+      this.#data.conversations = personaConversations(data.conversations,this.#data);
       this.#data.trae = normalizeTraeState(data.trae);
       this.#data.accounts = normalizeAccounts(data.accounts);
       if(!this.#data.activeModelId){const p=this.#data.providers.find(p=>p.id===this.#data.activeProviderId);if(p){this.#data.activeModelId=canonicalModelId(p.model);if(data.modelMaxOutputTokens===undefined)this.#data.modelMaxOutputTokens=p.maxOutputTokens??null;}}
@@ -119,21 +144,31 @@ export class LocalStore {
   publicConfig() {
     const d = this.get();
     delete d.memories;
+    delete d.conversations;
     d.trae = publicTraeState(d.trae);
     d.accounts = publicAccounts(d.accounts);
     d.providers = d.providers.map(({ apiKey, ...p }) => ({ ...p, hasKey: !!apiKey }));
-    const { token, official, ...qq } = d.qq;
+    const { token, official, napcat, ...qq } = d.qq;
+    const { webuiToken, ...publicNapcat } = napcat;
     const { appSecret, ...publicOfficial } = official;
-    d.qq = { ...qq, hasToken: !!token, official: { ...publicOfficial, hasSecret: !!appSecret } };
+    d.qq = { ...qq, hasToken: !!token, napcat: {...publicNapcat,hasToken:!!webuiToken}, official: { ...publicOfficial, hasSecret: !!appSecret } };
     return d;
   }
+  async deletePersona(id) {return this.#change(data=>removePersona(data,id));}
   async update(input) { return this.#change(data => mergeConfig(input, data)); }
   async patchAccount(id, patch) {
     if (!accountChannel(id)) throw new Error('账号渠道不存在');
     return this.#change(data => {const accounts = normalizeAccounts(data.accounts);accounts[id] = {...accounts[id], ...patch};return {...data, accounts: normalizeAccounts(accounts)};});
   }
+  async patchBenefits(patch) { return this.#change(data => ({...data,benefits:normalizeBenefits({...data.benefits,...patch})})); }
   async patchTrae(patch) { return this.#change(data => ({ ...data, trae: normalizeTraeState({ ...data.trae, ...patch }) })); }
-  async memories(value) { return this.#change(data => ({ ...data, memories: normalizeSocialMemory(value) })); }
+  async appendConversation(scope,sender,turn,signal) {
+    return this.#change(data=>{signal?.throwIfAborted();const conversations=personaConversations(data.conversations,data),current=conversations.find(x=>x.scope===scope&&x.sender===sender);
+      const next={scope,sender,turns:[...(current?.turns??[]),turn]};return {...data,conversations:personaConversations([...conversations.filter(x=>x!==current),next],data)};});
+  }
+  async clearConversation(scope,sender) {return this.#change(data=>({...data,conversations:personaConversations(data.conversations,data).filter(x=>x.scope!==scope||x.sender!==sender)}));}
+  async personaMemories(id,value) {return this.#change(data=>({...data,memories:personaMemories([...data.memories.filter(m=>scopePersona(m.room)!==id),...normalizeSocialMemory(value).filter(m=>scopePersona(m.room)===id)],data)}));}
+  async memories(value) {return this.personaMemories(this.#data.activePersonaId??'default',value);}
   async #change(fn) {
     const op = this.#tail.then(async () => {
       const next = fn(this.#data);
